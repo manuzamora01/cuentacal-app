@@ -5,16 +5,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase'; 
-// ✅ Importamos el módulo de notificaciones
 import * as Notifications from 'expo-notifications';
 
-// ✅ Configuramos cómo se comportan las notificaciones si estás usando la app en ese momento
+// ✅ Añadido "as any" para que TypeScript no pida propiedades extra
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-  }),
+  } as any),
 });
 
 interface FoodItem {
@@ -38,7 +37,7 @@ interface WaterLog {
 }
 
 // 🔑 PON TU API KEY DE GEMINI AQUÍ
-const GEMINI_API_KEY = "PEGA_AQUI_TU_API_KEY_DE_GEMINI";
+const GEMINI_API_KEY = "AIzaSyCeUyNhP-7rnVzMTdjOe4W2WId_ZptYmBE";
 
 const formatCustomDate = (date: Date) => {
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -107,7 +106,6 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
-  // ✅ NUEVO useEffect: Configuración de Notificaciones
   useEffect(() => {
     async function configurePushNotifications() {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -119,13 +117,11 @@ export default function HomeScreen() {
       }
       
       if (finalStatus !== 'granted') {
-        return; // Si el usuario dice que no, no hacemos nada.
+        return; 
       }
 
-      // Borramos las alarmas viejas para no acumularlas
       await Notifications.cancelAllScheduledNotificationsAsync();
 
-      // Programamos recordatorios de agua diarios
       const waterHours = [10, 14, 18];
       for (const hour of waterHours) {
         await Notifications.scheduleNotificationAsync({
@@ -138,7 +134,6 @@ export default function HomeScreen() {
         });
       }
 
-      // Programamos recordatorio de cierre del día
       await Notifications.scheduleNotificationAsync({
         content: {
           title: "🍏 Cierre del día",
