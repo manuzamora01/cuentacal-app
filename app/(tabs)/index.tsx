@@ -115,7 +115,6 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
-  // ✅ SOLUCIÓN: Lógica de 7 días exactos para evitar bombardeo de notificaciones
   const saveAndScheduleAlarms = async () => {
     setLoading(true);
     try {
@@ -148,13 +147,11 @@ export default function HomeScreen() {
           const targetMinute = parseInt(m);
           const isNight = targetHour >= 20;
 
-          // Programamos el aviso para los próximos 7 días
           for (let i = 0; i < 7; i++) {
             const triggerDate = new Date();
             triggerDate.setHours(targetHour, targetMinute, 0, 0);
             triggerDate.setDate(triggerDate.getDate() + i);
 
-            // Solo programar si la hora exacta es estrictamente en el futuro
             if (triggerDate > now) {
               await Notifications.scheduleNotificationAsync({
                 content: {
@@ -162,7 +159,6 @@ export default function HomeScreen() {
                   body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
                   sound: true,
                 },
-                // Ahora usamos fecha exacta en lugar de repetición diaria
                 trigger: { date: triggerDate } as any,
               });
             }
@@ -356,7 +352,6 @@ export default function HomeScreen() {
       let prompt = ""; let payloadContents: any[] = [];
 
       if (type === 'image') {
-        // ✅ NUEVO PROMPT DE JERARQUÍA DE CONFIANZA: Priorizamos marca y producto sobre visual.
         prompt = `Actúa como un tasador experto de porciones y nutricionista clínico.
                   Tu OBJETIVO principal es la máxima precisión. Sigue esta jerarquía de confianza:
                   
@@ -393,7 +388,6 @@ export default function HomeScreen() {
       const jsonResponse = await response.json();
       let text = jsonResponse.candidates[0].content.parts[0].text;
       
-      // ✅ NUEVO FILTRO: Recortamos solo el JSON puro, ignorando si la IA dice "Claro, aquí tienes..."
       const startIndex = text.indexOf('{');
       const endIndex = text.lastIndexOf('}');
       
@@ -694,11 +688,12 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
+      {/* ✅ AQUÍ ESTÁ LA NUEVA DRAFT CARD ACTUALIZADA */}
       <Modal visible={!!pendingFood} transparent={true} animationType="slide">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
-            <Text style={styles.editTitle}>Revisa los datos</Text>
-            <Text style={styles.helpText}>Ajusta las cantidades si no vas a tomar 100g/ml</Text>
+            <Text style={styles.editTitle}>✨ Análisis de la IA</Text>
+            <Text style={styles.helpText}>Comprueba la estimación del plato completo y edita si lo ves necesario.</Text>
             
             <Text style={styles.inputLabel}>Nombre del alimento/ejercicio</Text>
             <TextInput style={styles.inputField} value={pendingFood?.name} onChangeText={(t) => setPendingFood(prev => prev ? {...prev, name: t} : null)} />
@@ -723,7 +718,7 @@ export default function HomeScreen() {
               </View>
             </View>
             <View style={styles.editButtonsRow}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setPendingFood(null)}><Text style={styles.cancelButtonText}>Cancelar</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setPendingFood(null)}><Text style={styles.cancelButtonText}>Descartar</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={confirmAndSaveFood}><Text style={styles.saveButtonText}>Guardar</Text></TouchableOpacity>
             </View>
           </View>
