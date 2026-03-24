@@ -10,6 +10,8 @@ export default function ProfileScreen() {
   const [weightModalVisible, setWeightModalVisible] = useState(false);
   const [newWeight, setNewWeight] = useState('');
   const [weightHistory, setWeightHistory] = useState<any[]>([]);
+  // ✅ Nuevo estado para saber el tamaño exacto del lienzo de la gráfica en la pantalla
+  const [chartDim, setChartDim] = useState({ width: 0, height: 200 });
 
   const defaultProfile = {
     gender: 'male', 
@@ -188,7 +190,7 @@ export default function ProfileScreen() {
   const chartData = [...weightHistory].slice(0, 7).reverse();
   const maxChartWeight = chartData.length > 0 ? Math.max(...chartData.map(d => d.weight), userData.targetWeight) + 1 : 0;
   const minChartWeight = chartData.length > 0 ? Math.min(...chartData.map(d => d.weight), userData.targetWeight) - 1 : 0;
-  const chartRange = maxChartWeight - minChartWeight;
+  const chartRange = (maxChartWeight - minChartWeight) || 1; // Evitamos división por cero si la diferencia es nula
 
   const formatDateShort = (dateObj: any) => {
     if (!dateObj) return '';
@@ -279,19 +281,58 @@ export default function ProfileScreen() {
         ) : (
           <>
             <Text style={styles.chartHintText}>Toca un punto para gestionar el registro</Text>
-            <View style={styles.customChartContainer}>
-              {/* ✅ Aplicado "as any" a las posiciones relativas para evitar el quejido de TypeScript */}
+            {/* ✅ onLayout captura el tamaño real de la caja para que las matemáticas sean exactas */}
+            <View 
+              style={styles.customChartContainer}
+              onLayout={(e) => setChartDim({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
+            >
               <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` as any }]} />
               <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` as any }]}>Meta</Text>
 
-              {chartData.map((log, index) => {
-                const xPos = `${(index / (chartData.length - 1)) * 90 + 5}%`; 
-                const yPos = `${((log.weight - minChartWeight) / chartRange) * 100}%`;
+              {/* 🔗 LÍNEAS CONECTORAS (Solo se dibujan si ya sabemos el ancho del contenedor) */}
+              {chartDim.width > 0 && chartData.map((log, index) => {
+                if (index === chartData.length - 1) return null; // El último punto no dibuja línea
+                const nextLog = chartData[index + 1];
+
+                // Calculamos las posiciones exactas en píxeles
+                const x1 = (index / (chartData.length - 1)) * 0.9 * chartDim.width + 0.05 * chartDim.width;
+                const y1 = chartDim.height - (((log.weight - minChartWeight) / chartRange) * chartDim.height);
+                
+                const x2 = ((index + 1) / (chartData.length - 1)) * 0.9 * chartDim.width + 0.05 * chartDim.width;
+                const y2 = chartDim.height - (((nextLog.weight - minChartWeight) / chartRange) * chartDim.height);
+
+                // Pitágoras para calcular la distancia y trigonometría para el ángulo
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+                return (
+                  <View
+                    key={`line-${log.id}`}
+                    style={{
+                      position: 'absolute',
+                      backgroundColor: '#4C8BF5', // Azul un poco más claro
+                      height: 3,
+                      width: length,
+                      left: x1 + dx / 2 - length / 2,
+                      top: y1 + dy / 2 - 1.5,
+                      transform: [{ rotate: `${angle}deg` }],
+                      zIndex: 1, // Por debajo de los puntos
+                    }}
+                  />
+                );
+              })}
+
+              {/* 🔵 PUNTOS */}
+              {chartDim.width > 0 && chartData.map((log, index) => {
+                const xPos = (index / (chartData.length - 1)) * 0.9 * chartDim.width + 0.05 * chartDim.width; 
+                const yPos = chartDim.height - (((log.weight - minChartWeight) / chartRange) * chartDim.height);
                 
                 return (
                   <TouchableOpacity 
                     key={log.id} 
-                    style={[styles.chartPointWrapper, { left: xPos as any, bottom: yPos as any }]}
+                    style={[styles.chartPointWrapper, { left: xPos, top: yPos, marginTop: -6 }]}
                     onPress={() => deleteWeightPrompt(log.id, log.weight)}
                     hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}
                   >
@@ -438,7 +479,8 @@ const styles = StyleSheet.create({
   customChartContainer: { height: 200, width: '100%', position: 'relative', marginTop: 20, marginBottom: 30 },
   targetLineChart: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#FF6B6B', borderStyle: 'dashed', opacity: 0.4 },
   targetLineLabel: { position: 'absolute', left: 0, fontSize: 10, color: '#FF6B6B', fontWeight: 'bold', marginTop: -15 },
-  chartPointWrapper: { position: 'absolute', alignItems: 'center', width: 40, marginLeft: -20, marginBottom: -6 },
+  // ✅ Eliminamos el marginBottom para que la posición 'top' no se altere
+  chartPointWrapper: { position: 'absolute', alignItems: 'center', width: 40, marginLeft: -20, zIndex: 2 },
   chartDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#0047AB', borderWidth: 2, borderColor: '#FFFFFF', elevation: 3 },
   chartDotText: { fontSize: 12, fontWeight: '900', color: '#003366', position: 'absolute', top: -20 },
   chartDateText: { fontSize: 10, color: '#6699CC', fontWeight: 'bold', position: 'absolute', bottom: -22, width: 50, textAlign: 'center' },
