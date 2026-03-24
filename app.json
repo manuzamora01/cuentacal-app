@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "mi-contador-calorias",
-    "slug": "mi-contador-calorias",
-    "version": "1.0.0",
+    "name": "CuentaCal",
+    "slug": "CuentaCal",
+    "version": "1.4.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "micontadorcalorias",
