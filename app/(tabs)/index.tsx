@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image } from 'react-native';
-import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase'; 
 
@@ -50,12 +51,17 @@ export default function HomeScreen() {
   const [streak, setStreak] = useState(0);
 
   const [textModalVisible, setTextModalVisible] = useState(false);
-  const [inputType, setInputType] = useState<'food' | 'exercise'>('food');
+  const [inputType, setInputType] = useState<'food' | 'exercise'>('exercise'); 
   const [inputText, setInputText] = useState('');
   const [savedFoodsVisible, setSavedFoodsVisible] = useState(false);
   const [waterModalVisible, setWaterModalVisible] = useState(false);
   const [waterInput, setWaterInput] = useState('250');
 
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+
+  // Aseguramos que siempre devuelve la estructura correcta {days: [], headerText: ''}
   const weekData = useMemo(() => {
     const today = new Date();
     today.setDate(today.getDate() + (weekOffset * 7));
@@ -65,11 +71,11 @@ export default function HomeScreen() {
     const monday = new Date(today);
     monday.setDate(today.getDate() + distToMonday);
 
-    const days = [];
+    const calculatedDays = [];
     for (let i = 0; i < 7; i++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + i);
-      days.push({
+      calculatedDays.push({
         letter: ['L', 'M', 'X', 'J', 'V', 'S', 'D'][i],
         dayNumber: date.getDate(),
         fullDate: date,
@@ -81,18 +87,17 @@ export default function HomeScreen() {
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     
-    let headerText = '';
+    let text = '';
     if (monday.getMonth() === sunday.getMonth()) {
-      headerText = `${monday.getDate()} - ${formatCustomDate(sunday)}`;
+      text = `${monday.getDate()} - ${formatCustomDate(sunday)}`;
     } else {
-      headerText = `${formatCustomDate(monday)} - ${formatCustomDate(sunday)}`;
+      text = `${formatCustomDate(monday)} - ${formatCustomDate(sunday)}`;
     }
 
-    return { days, headerText };
+    return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
   useEffect(() => {
-    // ✅ Escucha en tiempo real de tu perfil para actualizar calorías y agua al instante
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
       if (docSnap.exists()) {
         setMetaCalorias(docSnap.data().metaCalorias || 2000);
@@ -142,10 +147,11 @@ export default function HomeScreen() {
     setStreak(currentStreak);
   }, [foodList, waterList]);
 
-  const uniqueSavedFoods = Array.from(new Map(foodList.filter(f => f.calories > 0).map(item => [item.name, item])).values());
+  // Protección para asegurar que filter y map no fallen si uniqueSavedFoods calcula algo raro
+  const uniqueSavedFoods = Array.from(new Map((foodList || []).filter(f => f.calories > 0).map(item => [item.name, item])).values());
 
-  const dailyFoods = foodList.filter(food => food.jsDate && food.jsDate.toDateString() === selectedDate.toDateString());
-  const dailyWaterLogs = waterList.filter(water => water.jsDate && water.jsDate.toDateString() === selectedDate.toDateString());
+  const dailyFoods = (foodList || []).filter(food => food.jsDate && food.jsDate.toDateString() === selectedDate.toDateString());
+  const dailyWaterLogs = (waterList || []).filter(water => water.jsDate && water.jsDate.toDateString() === selectedDate.toDateString());
 
   const totalCalories = dailyFoods.reduce((sum, item) => sum + item.calories, 0);
   const totalProtein = dailyFoods.reduce((sum, item) => sum + item.protein, 0);
@@ -157,6 +163,52 @@ export default function HomeScreen() {
   const metaHidratos = Math.round((metaCalorias * 0.4) / 4);
   const metaGrasas = Math.round((metaCalorias * 0.3) / 9);
 
+  const openBarcodeScanner = async () => {
+    setIsMenuVisible(false);
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        Alert.alert("Permiso denegado", "Necesitas dar permiso a la cámara para escanear productos.");
+        return;
+      }
+    }
+    setScanned(false);
+    setScannerVisible(true);
+  };
+
+  const handleBarcodeScanned = async ({ type, data }: { type: string, data: string }) => {
+    setScanned(true);
+    setScannerVisible(false);
+    setLoading(true);
+
+    try {
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      const json = await response.json();
+
+      if (json.status === 1 && json.product) {
+        const product = json.product;
+        const nutriments = product.nutriments || {};
+        
+        setPendingFood({
+          id: '',
+          name: product.product_name_es || product.product_name || 'Producto Desconocido',
+          calories: Math.round(nutriments['energy-kcal_100g'] || nutriments['energy-kcal'] || 0),
+          protein: Math.round(nutriments.proteins_100g || nutriments.proteins || 0),
+          carbs: Math.round(nutriments.carbohydrates_100g || nutriments.carbohydrates || 0),
+          fat: Math.round(nutriments.fat_100g || nutriments.fat || 0),
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          imageBase64: '' 
+        });
+      } else {
+        Alert.alert("No encontrado", "Este producto no está en la base de datos pública. Intenta usar la IA con una foto.");
+      }
+    } catch (error) {
+      Alert.alert("Error de conexión", "No pudimos conectar con la base de datos.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const analyzeWithGemini = async (inputData: string, type: 'image' | 'food' | 'exercise') => {
     setLoading(true);
     try {
@@ -166,9 +218,6 @@ export default function HomeScreen() {
       if (type === 'image') {
         prompt = `Analiza esta imagen. Devuelve ESTRICTAMENTE un JSON válido: {"food_name": "Nombre", "calories": número, "protein": número, "carbs": número, "fat": número}`;
         payloadContents = [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: inputData } }] }];
-      } else if (type === 'food') {
-        prompt = `Calcula macros aproximados para: "${inputData}". Devuelve JSON: {"food_name": "Nombre", "calories": número, "protein": número, "carbs": número, "fat": número}`;
-        payloadContents = [{ parts: [{ text: prompt }] }];
       } else if (type === 'exercise') {
         prompt = `Calcula calorías quemadas por: "${inputData}". Devuelve JSON: {"food_name": "🏃‍♂️ Nombre ejercicio", "calories": número NEGATIVO, "protein": 0, "carbs": 0, "fat": 0}`;
         payloadContents = [{ parts: [{ text: prompt }] }];
@@ -193,7 +242,7 @@ export default function HomeScreen() {
 
   const handleScanMenu = () => {
     setIsMenuVisible(false);
-    Alert.alert("Escanear alimento", "¿De dónde quieres obtener la imagen?", [
+    Alert.alert("Escanear alimento", "¿De dónde quieres obtener la imagen para la IA?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Cámara", onPress: takePhoto },
       { text: "Galería", onPress: pickImageFromGallery }
@@ -297,7 +346,8 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.calendarRow}>
-          {weekData.days.map((day, index) => (
+          {/* ✅ Seguro antiquiebres por caché: (weekData.days || []) */}
+          {(weekData.days || []).map((day, index) => (
              <TouchableOpacity key={index} style={styles.calendarDay} onPress={() => setSelectedDate(day.fullDate)}>
                <Text style={[styles.calendarDayText, day.isTodayReal && {color: '#0047AB', fontWeight: 'bold'}]}>{day.letter}</Text>
                <View style={[styles.calendarCircle, day.isSelected && styles.calendarCircleActive]}>
@@ -382,15 +432,35 @@ export default function HomeScreen() {
       {loading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#0047AB" />
-          <Text style={styles.loadingText}>Analizando con IA...</Text>
+          <Text style={styles.loadingText}>Cargando...</Text>
         </View>
       )}
 
-      {/* MODALES */}
+      {/* MODAL: LA CÁMARA DEL ESCÁNER */}
+      <Modal visible={scannerVisible} animationType="slide" transparent={false}>
+        <View style={styles.scannerContainer}>
+          <Text style={styles.scannerTitle}>Escanea un código de barras</Text>
+          <View style={styles.scannerViewport}>
+            <CameraView 
+              style={StyleSheet.absoluteFillObject}
+              facing="back"
+              onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+              barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"] }}
+            />
+            <View style={styles.scannerTarget} />
+          </View>
+          <TouchableOpacity style={styles.closeScannerBtn} onPress={() => setScannerVisible(false)}>
+            <Text style={styles.closeScannerText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       <Modal visible={!!pendingFood} transparent={true} animationType="slide">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
             <Text style={styles.editTitle}>Revisa los datos</Text>
+            <Text style={styles.helpText}>Ajusta las cantidades si no vas a tomar 100g/ml</Text>
+            
             <Text style={styles.inputLabel}>Nombre del alimento/ejercicio</Text>
             <TextInput style={styles.inputField} value={pendingFood?.name} onChangeText={(t) => setPendingFood(prev => prev ? {...prev, name: t} : null)} />
             <View style={styles.editRow}>
@@ -424,8 +494,8 @@ export default function HomeScreen() {
       <Modal visible={textModalVisible} transparent={true} animationType="fade">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
-            <Text style={styles.editTitle}>{inputType === 'food' ? 'Buscar Alimento' : 'Registrar Ejercicio'}</Text>
-            <Text style={styles.inputLabel}>{inputType === 'food' ? 'Ej: Plato de lentejas' : 'Ej: Corrí durante 45 minutos'}</Text>
+            <Text style={styles.editTitle}>Registrar Ejercicio</Text>
+            <Text style={styles.inputLabel}>Ej: Corrí durante 45 minutos</Text>
             <TextInput style={[styles.inputField, { height: 100, textAlignVertical: 'top' }]} multiline={true} placeholder="Escribe aquí..." value={inputText} onChangeText={setInputText} />
             <View style={styles.editButtonsRow}>
               <TouchableOpacity style={styles.cancelButton} onPress={() => setTextModalVisible(false)}><Text style={styles.cancelButtonText}>Cancelar</Text></TouchableOpacity>
@@ -445,6 +515,7 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.cancelButton} onPress={() => setWaterModalVisible(false)}><Text style={styles.cancelButtonText}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={saveCustomWater}><Text style={styles.saveButtonText}>Guardar</Text></TouchableOpacity>
             </View>
+            {/* ✅ Sintaxis JSX del Agua completamente limpia */}
             {dailyWaterLogs.length > 0 && (
               <TouchableOpacity style={{marginTop: 20, alignItems: 'center'}} onPress={undoLastWater}>
                 <Text style={{color: '#FF6B6B', fontWeight: 'bold', fontSize: 14}}>Deshacer último registro</Text>
@@ -488,8 +559,8 @@ export default function HomeScreen() {
           <View style={styles.gridContainer}>
             <TouchableOpacity style={styles.gridBox} onPress={() => openTextModal('exercise')}><Activity size={32} color="#000" /><Text style={styles.gridBoxText}>Registrar ejercicio</Text></TouchableOpacity>
             <TouchableOpacity style={styles.gridBox} onPress={() => { setIsMenuVisible(false); setSavedFoodsVisible(true); }}><CheckCircle2 size={32} color="#000" /><Text style={styles.gridBoxText}>Alimentos guardados</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.gridBox} onPress={() => openTextModal('food')}><Edit3 size={32} color="#000" /><Text style={styles.gridBoxText}>Base de datos de ali...</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.gridBox} onPress={handleScanMenu}><Camera size={32} color="#000" /><Text style={styles.gridBoxText}>Escanear alimento</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.gridBox} onPress={openBarcodeScanner}><Barcode size={32} color="#000" /><Text style={styles.gridBoxText}>Escanear código</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.gridBox} onPress={handleScanMenu}><Camera size={32} color="#000" /><Text style={styles.gridBoxText}>Analizar foto IA</Text></TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.closeFabDark} onPress={() => setIsMenuVisible(false)}><X size={32} color="#FFFFFF" /></TouchableOpacity>
         </View>
@@ -550,7 +621,8 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 15, fontSize: 16, fontWeight: 'bold', color: '#0047AB' },
   editModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 51, 102, 0.6)', justifyContent: 'center', padding: 20 },
   editModalContent: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 25, borderWidth: 1, borderColor: '#B3D4FF' },
-  editTitle: { fontSize: 22, fontWeight: '900', color: '#003366', marginBottom: 20, textAlign: 'center' },
+  editTitle: { fontSize: 22, fontWeight: '900', color: '#003366', marginBottom: 5, textAlign: 'center' },
+  helpText: { textAlign: 'center', fontSize: 12, color: '#6699CC', marginBottom: 20, fontStyle: 'italic' },
   inputLabel: { fontSize: 12, color: '#6699CC', marginBottom: 5, fontWeight: 'bold' },
   inputField: { backgroundColor: '#F0F8FF', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 12, padding: 12, fontSize: 16, color: '#003366', marginBottom: 15 },
   editRow: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -564,5 +636,11 @@ const styles = StyleSheet.create({
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 110 },
   gridBox: { backgroundColor: '#FFFFFF', width: '47%', aspectRatio: 1, borderRadius: 28, justifyContent: 'center', alignItems: 'center', marginBottom: 16, padding: 15 },
   gridBoxText: { fontSize: 15, fontWeight: '800', color: '#000000', textAlign: 'center', marginTop: 12 },
-  closeFabDark: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#1C1C1E', width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center' }
+  closeFabDark: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#1C1C1E', width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center' },
+  scannerContainer: { flex: 1, backgroundColor: '#000000' },
+  scannerTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginTop: 50, marginBottom: 20 },
+  scannerViewport: { flex: 1, position: 'relative', overflow: 'hidden', borderRadius: 20, marginHorizontal: 20 },
+  scannerTarget: { position: 'absolute', top: '50%', left: '50%', width: 250, height: 150, marginTop: -75, marginLeft: -125, borderWidth: 2, borderColor: '#0047AB', borderRadius: 10, backgroundColor: 'rgba(0, 71, 171, 0.1)' },
+  closeScannerBtn: { backgroundColor: '#FF6B6B', padding: 20, margin: 20, borderRadius: 16, alignItems: 'center', marginBottom: 40 },
+  closeScannerText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 }
 });
