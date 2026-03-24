@@ -356,34 +356,60 @@ export default function HomeScreen() {
       let prompt = ""; let payloadContents: any[] = [];
 
       if (type === 'image') {
-        // ✅ PROMPT ESTRICTO: Obligamos a estimar la porción total servida
-        prompt = `Actúa como un nutricionista experto. Analiza la imagen e identifica todos los alimentos del plato. 
-                  MUY IMPORTANTE: NO devuelvas los valores por 100g. 
-                  Calcula visualmente la CANTIDAD TOTAL (en gramos o raciones) de lo que hay servido y devuelve los macronutrientes calculados para el PLATO COMPLETO.
-                  Devuelve ESTRICTAMENTE un JSON válido con esta estructura: 
-                  {"food_name": "Nombre del plato (aprox. Xg)", "calories": número, "protein": número, "carbs": número, "fat": número}`;
+        // ✅ NUEVO PROMPT DE JERARQUÍA DE CONFIANZA: Priorizamos marca y producto sobre visual.
+        prompt = `Actúa como un tasador experto de porciones y nutricionista clínico.
+                  Tu OBJETIVO principal es la máxima precisión. Sigue esta jerarquía de confianza:
+                  
+                  1. RECONOCIMIENTO DE MARCA Y PRODUCTO (Prioridad Máxima):
+                     Intenta leer el texto en el envase o reconocer la forma y marca del producto (ej: 'Sobaos de la marca hacendado').
+                     Si logras identificar el producto exacto y la marca, utiliza tu base de datos de conocimiento para dar los valores nutricionales ESTÁNDAR de ese producto (ej: 2 sobaos hacendado son 66g y tienen X calorías). El nombre debe incluir la marca.
+                  
+                  2. ESTIMACIÓN VISUAL DE VOLUMEN (Solo si la prioridad 1 falla):
+                     Si es un alimento casero o no branded (ej: un plato de arroz o dos sobaos caseros sin marca), usa el proceso visual:
+                     a. Busca referencias de tamaño (bordes del plato, cubiertos).
+                     b. Desglosa ingredientes y calcula su volumen (ej. una ración de arroz).
+                     c. Convierte esos volúmenes a gramos y calcula los macros totales del PLATO COMPLETO. NUNCA uses los valores base de 100g como resultado final.
+                  
+                  Puedes escribir todo tu razonamiento paso a paso, pero AL FINAL de tu respuesta, debes incluir ESTRICTAMENTE un JSON válido con este formato exacto:
+                  {"food_name": "Nombre exacto y cantidad/marca estimada", "calories": número, "protein": número, "carbs": número, "fat": número}`;
         payloadContents = [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: inputData } }] }];
       } else if (type === 'exercise') {
         prompt = `Calcula calorías quemadas por: "${inputData}". Devuelve JSON: {"food_name": "🏃‍♂️ Nombre ejercicio", "calories": número NEGATIVO, "protein": 0, "carbs": 0, "fat": 0}`;
         payloadContents = [{ parts: [{ text: prompt }] }];
       }
       
-      // ✅ IA MÁS POTENTE: Cambiado a gemini-2.5-pro para mejor razonamiento de cantidades
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${cleanApiKey}`, {
+      const model = 'gemini-2.5-flash'; 
+      
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanApiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: payloadContents })
       });
       
-      if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Error HTTP de Google ${response.status}: ${errorBody}`);
+      }
+      
       const jsonResponse = await response.json();
-      let text = jsonResponse.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
+      let text = jsonResponse.candidates[0].content.parts[0].text;
+      
+      // ✅ NUEVO FILTRO: Recortamos solo el JSON puro, ignorando si la IA dice "Claro, aquí tienes..."
+      const startIndex = text.indexOf('{');
+      const endIndex = text.lastIndexOf('}');
+      
+      if (startIndex !== -1 && endIndex !== -1) {
+        text = text.substring(startIndex, endIndex + 1);
+      }
+      
       const macros = JSON.parse(text);
       
       setPendingFood({
         id: '', name: macros.food_name, calories: macros.calories, protein: macros.protein, carbs: macros.carbs, fat: macros.fat,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), imageBase64: type === 'image' ? inputData : '' 
       });
-    } catch (error: any) { Alert.alert("Error de IA", "No pudimos analizar la información."); } finally { setLoading(false); }
+    } catch (error: any) { 
+      Alert.alert("Error de IA Detallado", `No pudimos analizar la información.\n\nDetalles técnicos:\n${error.message}`); 
+    } finally { setLoading(false); }
   };
 
   const handleScanMenu = () => {
