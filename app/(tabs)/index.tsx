@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image } from 'react-native';
-import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode } from 'lucide-react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform } from 'react-native';
+// ✅ Importado el icono Bell para las alarmas
+import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode, Bell } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+// ✅ Añadido updateDoc para guardar las alarmas
+import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase'; 
 import * as Notifications from 'expo-notifications';
 
-// ✅ Añadido "as any" para que TypeScript no pida propiedades extra
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -71,6 +72,11 @@ export default function HomeScreen() {
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
 
+  // ✅ NUEVOS ESTADOS PARA ALARMAS
+  const [alarmModalVisible, setAlarmModalVisible] = useState(false);
+  const [reminders, setReminders] = useState<string[]>(['10:00', '14:00', '18:00', '21:00']);
+  const [newAlarm, setNewAlarm] = useState('');
+
   const weekData = useMemo(() => {
     const today = new Date();
     today.setDate(today.getDate() + (weekOffset * 7));
@@ -106,52 +112,60 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
-  useEffect(() => {
-    async function configurePushNotifications() {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-      
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+  // ✅ LÓGICA DE ALARMAS MEJORADA (Se ejecuta al darle a Guardar en el Modal)
+  const saveAndScheduleAlarms = async () => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "usuarios", "mi_perfil"), { reminders: reminders });
+
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert("Permiso denegado", "No podemos enviar notificaciones.");
+        setLoading(false);
+        return;
       }
-      
-      if (finalStatus !== 'granted') {
-        return; 
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('alarmas', {
+          name: 'Alarmas y Recordatorios',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#0047AB',
+        });
       }
 
       await Notifications.cancelAllScheduledNotificationsAsync();
 
-      const waterHours = [10, 14, 18];
-      for (const hour of waterHours) {
+      for (const time of reminders) {
+        const [h, m] = time.split(':');
+        const isNight = parseInt(h) >= 20;
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: "💧 ¡Hora de hidratarse!",
-            body: "Un pequeño trago de agua te acerca a tu meta diaria.",
+            title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
+            body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
             sound: true,
           },
-          trigger: { hour: hour, minute: 0, repeats: true } as any,
+          // ✅ FIX ERROR: Añadido channelId obligatorio para Android
+          trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
         });
       }
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "🍏 Cierre del día",
-          body: "¿Has registrado todas tus comidas? ¡No pierdas tu racha de fuego!",
-          sound: true,
-        },
-        trigger: { hour: 21, minute: 0, repeats: true } as any,
-      });
+      
+      setAlarmModalVisible(false);
+      Alert.alert("¡Hecho!", "Notificaciones programadas con éxito.");
+    } catch (e) {
+      Alert.alert("Error", "No se pudieron configurar las alarmas.");
+    } finally {
+      setLoading(false);
     }
-
-    configurePushNotifications();
-  }, []);
+  };
 
   useEffect(() => {
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
       if (docSnap.exists()) {
-        setMetaCalorias(docSnap.data().metaCalorias || 2000);
-        setMetaAgua(docSnap.data().metaAgua || 2500);
+        const data = docSnap.data();
+        setMetaCalorias(data.metaCalorias || 2000);
+        setMetaAgua(data.metaAgua || 2500);
+        if (data.reminders) setReminders(data.reminders);
       }
     });
 
@@ -484,6 +498,65 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* ✅ NUEVO MODAL: Gestión Visual de Alarmas */}
+      <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
+        <View style={styles.editModalOverlay}>
+          <View style={styles.editModalContent}>
+            <Text style={styles.editTitle}>Tus Alarmas</Text>
+            <Text style={styles.helpText}>Personaliza cuándo quieres que te avisemos (Formato 24h)</Text>
+
+            <ScrollView style={{maxHeight: 200, marginBottom: 15}}>
+              {reminders.sort().map((time, index) => (
+                <View key={index} style={styles.recentItem}>
+                  <View style={styles.recentDetails}>
+                    <Text style={[styles.recentName, { fontSize: 18 }]}>⏰ {time}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setReminders(reminders.filter((_, i) => i !== index))}>
+                    <Trash2 size={24} color="#FF6B6B" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {reminders.length === 0 && <Text style={{textAlign: 'center', color: '#6699CC', fontStyle: 'italic'}}>No tienes alarmas activas.</Text>}
+            </ScrollView>
+
+            <View style={styles.editRow}>
+              <TextInput
+                style={[styles.inputField, { flex: 1, marginRight: 10, textAlign: 'center' }]}
+                placeholder="Ej: 14:30"
+                value={newAlarm}
+                onChangeText={setNewAlarm}
+                maxLength={5}
+                keyboardType="numeric"
+              />
+              <TouchableOpacity
+                style={[styles.saveButton, { width: 'auto', paddingHorizontal: 20 }]}
+                onPress={() => {
+                  if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newAlarm)) {
+                    if (!reminders.includes(newAlarm)) {
+                      setReminders([...reminders, newAlarm]);
+                    }
+                    setNewAlarm('');
+                  } else {
+                    Alert.alert("Formato inválido", "Usa el formato HH:MM (ejemplo: 09:30 o 14:00)");
+                  }
+                }}
+              >
+                <Text style={styles.saveButtonText}>Añadir</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.editButtonsRow}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setAlarmModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveButton} onPress={saveAndScheduleAlarms}>
+                <Text style={styles.saveButtonText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={scannerVisible} animationType="slide" transparent={false}>
         <View style={styles.scannerContainer}>
           <Text style={styles.scannerTitle}>Escanea un código de barras</Text>
@@ -607,6 +680,8 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.gridBox} onPress={() => { setIsMenuVisible(false); setSavedFoodsVisible(true); }}><CheckCircle2 size={32} color="#000" /><Text style={styles.gridBoxText}>Alimentos guardados</Text></TouchableOpacity>
             <TouchableOpacity style={styles.gridBox} onPress={openBarcodeScanner}><Barcode size={32} color="#000" /><Text style={styles.gridBoxText}>Escanear código</Text></TouchableOpacity>
             <TouchableOpacity style={styles.gridBox} onPress={handleScanMenu}><Camera size={32} color="#000" /><Text style={styles.gridBoxText}>Analizar foto IA</Text></TouchableOpacity>
+            {/* ✅ NUEVO BOTÓN: Configurar Alarmas (ocupa el ancho completo en la base de la cuadrícula) */}
+            <TouchableOpacity style={[styles.gridBox, {width: '100%'}]} onPress={() => { setIsMenuVisible(false); setAlarmModalVisible(true); }}><Bell size={32} color="#000" /><Text style={styles.gridBoxText}>Configurar Alarmas</Text></TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.closeFabDark} onPress={() => setIsMenuVisible(false)}><X size={32} color="#FFFFFF" /></TouchableOpacity>
         </View>
@@ -676,7 +751,7 @@ const styles = StyleSheet.create({
   editButtonsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   cancelButton: { paddingVertical: 15, width: '48%', borderRadius: 12, backgroundColor: '#E6F0FA', alignItems: 'center' },
   cancelButtonText: { color: '#0047AB', fontWeight: 'bold', fontSize: 16 },
-  saveButton: { paddingVertical: 15, width: '48%', borderRadius: 12, backgroundColor: '#0047AB', alignItems: 'center' },
+  saveButton: { paddingVertical: 15, width: '48%', borderRadius: 12, backgroundColor: '#0047AB', alignItems: 'center', justifyContent: 'center' },
   saveButtonText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 },
   darkModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'flex-end' },
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 110 },
