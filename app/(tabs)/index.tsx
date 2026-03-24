@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform, LogBox } from 'react-native';
 import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode, Bell } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -7,7 +7,9 @@ import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateD
 import { db } from '../../firebase'; 
 import * as Notifications from 'expo-notifications';
 
-// Intentamos configurar el handler, ignorando el error si Expo Go lo rechaza
+// ✅ SILENCIADOR DEFINITIVO: Ocultamos el aviso rojo de Expo Go para poder trabajar en paz
+LogBox.ignoreLogs(['expo-notifications: Android Push notifications']);
+
 try {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -17,7 +19,7 @@ try {
     } as any),
   });
 } catch (e) {
-  // Silenciado para Expo Go
+  // Silenciado
 }
 
 interface FoodItem {
@@ -163,7 +165,6 @@ export default function HomeScreen() {
     }
   };
 
-  // ✅ AQUÍ ESTÁ EL ARREGLO: Silenciamos el error de Expo Go al cargar la pantalla
   useEffect(() => {
     async function configurePushNotifications() {
       try {
@@ -199,13 +200,12 @@ export default function HomeScreen() {
           });
         }
       } catch (e) {
-        // Silenciamos el error para que Expo Go no lance la pantalla roja al inicio
         console.log("Expo Go bloquea notificaciones, saltando configuración automática.");
       }
     }
 
     configurePushNotifications();
-  }, [reminders]); // Se vuelve a ejecutar si cambian los recordatorios
+  }, [reminders]);
 
   useEffect(() => {
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
@@ -551,6 +551,7 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* MODAL CONFIGURACIÓN ALARMAS */}
       <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
@@ -572,13 +573,22 @@ export default function HomeScreen() {
             </ScrollView>
 
             <View style={styles.editRow}>
+              {/* ✅ AQUÍ ESTÁ LA MAGIA DEL AUTO-FORMATO */}
               <TextInput
-                style={[styles.inputField, { flex: 1, marginRight: 10, textAlign: 'center' }]}
-                placeholder="Ej: 14:30"
+                style={[styles.inputField, { flex: 1, marginRight: 10, textAlign: 'center', fontSize: 18 }]}
+                placeholder="Ej: 1430"
                 value={newAlarm}
-                onChangeText={setNewAlarm}
+                keyboardType="number-pad"
                 maxLength={5}
-                keyboardType="numeric"
+                onChangeText={(text) => {
+                  // Eliminamos todo lo que no sea número
+                  let val = text.replace(/[^0-9]/g, '');
+                  // Añadimos los dos puntos automáticamente
+                  if (val.length > 2) {
+                    val = val.substring(0, 2) + ':' + val.substring(2, 4);
+                  }
+                  setNewAlarm(val);
+                }}
               />
               <TouchableOpacity
                 style={[styles.saveButton, { width: 'auto', paddingHorizontal: 20 }]}
@@ -589,7 +599,7 @@ export default function HomeScreen() {
                     }
                     setNewAlarm('');
                   } else {
-                    Alert.alert("Formato inválido", "Usa el formato HH:MM (ejemplo: 09:30 o 14:00)");
+                    Alert.alert("Formato inválido", "Escribe 4 números (ej: 0930 o 1400)");
                   }
                 }}
               >
