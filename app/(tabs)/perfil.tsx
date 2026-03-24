@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { User, Target, Activity, Edit3, Scale, Flame, Droplets, ChevronRight, X, TrendingDown } from 'lucide-react-native';
-// ✅ Importaciones añadidas: updateDoc y deleteDoc
 import { doc, getDoc, setDoc, collection, addDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -107,7 +106,6 @@ export default function ProfileScreen() {
     }
   };
 
-  // ✅ LOGICA MEJORADA: Comprobar si ya existe un peso de hoy
   const logNewWeight = async () => {
     const weight = parseFloat(newWeight);
     if (isNaN(weight) || weight <= 0) {
@@ -127,10 +125,8 @@ export default function ProfileScreen() {
       });
 
       if (existingEntry) {
-        // Actualizar el peso de hoy en vez de crear uno nuevo
         await updateDoc(doc(db, "usuarios/mi_perfil/historial_peso", existingEntry.id), { weight: weight });
       } else {
-        // Crear un registro nuevo si hoy no hay nada
         await addDoc(collection(db, "usuarios/mi_perfil/historial_peso"), { weight: weight, date: new Date() });
       }
 
@@ -145,7 +141,6 @@ export default function ProfileScreen() {
     }
   };
 
-  // ✅ NUEVA FUNCIÓN: Borrar un peso desde la gráfica
   const deleteWeightPrompt = (id: string, weight: number) => {
     Alert.alert(
       "Borrar registro", 
@@ -156,7 +151,6 @@ export default function ProfileScreen() {
             try {
               await deleteDoc(doc(db, "usuarios/mi_perfil/historial_peso", id));
               
-              // Inteligencia extra: Si borraste el peso más reciente, volvemos al anterior
               if (weightHistory.length > 1 && weightHistory[0].id === id) {
                 const previousWeight = weightHistory[1].weight;
                 const updatedData = { ...userData, currentWeight: previousWeight };
@@ -286,18 +280,18 @@ export default function ProfileScreen() {
           <>
             <Text style={styles.chartHintText}>Toca un punto para gestionar el registro</Text>
             <View style={styles.customChartContainer}>
-              <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]} />
-              <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]}>Meta</Text>
+              {/* ✅ Aplicado "as any" a las posiciones relativas para evitar el quejido de TypeScript */}
+              <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` as any }]} />
+              <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` as any }]}>Meta</Text>
 
               {chartData.map((log, index) => {
                 const xPos = `${(index / (chartData.length - 1)) * 90 + 5}%`; 
                 const yPos = `${((log.weight - minChartWeight) / chartRange) * 100}%`;
                 
                 return (
-                  // ✅ Cambiado a TouchableOpacity con hitSlop para que sea fácil de pulsar
                   <TouchableOpacity 
                     key={log.id} 
-                    style={[styles.chartPointWrapper, { left: xPos, bottom: yPos }]}
+                    style={[styles.chartPointWrapper, { left: xPos as any, bottom: yPos as any }]}
                     onPress={() => deleteWeightPrompt(log.id, log.weight)}
                     hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}
                   >
@@ -312,7 +306,6 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      {/* MODAL CONFIGURACIÓN PERFIL */}
       <Modal visible={profileModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -384,7 +377,6 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* MODAL REGISTRAR PESO RÁPIDO */}
       <Modal visible={weightModalVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.smallModalContent}>
