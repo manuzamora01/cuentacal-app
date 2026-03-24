@@ -1,25 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform, LogBox } from 'react-native';
-import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode, Bell } from 'lucide-react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform } from 'react-native';
+import { Plus, X, Camera, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode, RefreshCw } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase'; 
-import * as Notifications from 'expo-notifications';
-
-LogBox.ignoreLogs(['expo-notifications: Android Push notifications']);
-
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    } as any),
-  });
-} catch (e) {
-  // Silenciado
-}
 
 interface FoodItem {
   id: string;
@@ -42,7 +27,7 @@ interface WaterLog {
 }
 
 // 🔑 PON TU API KEY DE GEMINI AQUÍ
-const GEMINI_API_KEY = "AIzaSyCeUyNhP-7rnVzMTdjOe4W2WId_ZptYmBE";
+const GEMINI_API_KEY = "AIzaSyDP0ZhTLQCYePxfuLXXNTSrg_g50xGia48";
 
 const formatCustomDate = (date: Date) => {
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -66,7 +51,7 @@ export default function HomeScreen() {
   const [streak, setStreak] = useState(0);
 
   const [textModalVisible, setTextModalVisible] = useState(false);
-  const [inputType, setInputType] = useState<'food' | 'exercise'>('exercise'); 
+  const [inputType, setInputType] = useState<'food' | 'exercise' | 'recalculate'>('exercise'); 
   const [inputText, setInputText] = useState('');
   const [savedFoodsVisible, setSavedFoodsVisible] = useState(false);
   const [waterModalVisible, setWaterModalVisible] = useState(false);
@@ -75,10 +60,6 @@ export default function HomeScreen() {
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
-
-  const [alarmModalVisible, setAlarmModalVisible] = useState(false);
-  const [reminders, setReminders] = useState<string[]>(['10:00', '14:00', '18:00', '21:00']);
-  const [newAlarm, setNewAlarm] = useState('');
 
   const weekData = useMemo(() => {
     const today = new Date();
@@ -115,130 +96,12 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
-  const saveAndScheduleAlarms = async () => {
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, "usuarios", "mi_perfil"), { reminders: reminders });
-
-      try {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert("Permiso denegado", "No podemos enviar notificaciones.");
-          setLoading(false);
-          return;
-        }
-
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('alarmas', {
-            name: 'Alarmas y Recordatorios',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#0047AB',
-          });
-        }
-
-        await Notifications.cancelAllScheduledNotificationsAsync();
-
-        const now = new Date();
-
-        for (const time of reminders) {
-          const [h, m] = time.split(':');
-          const targetHour = parseInt(h);
-          const targetMinute = parseInt(m);
-          const isNight = targetHour >= 20;
-
-          for (let i = 0; i < 7; i++) {
-            const triggerDate = new Date();
-            triggerDate.setHours(targetHour, targetMinute, 0, 0);
-            triggerDate.setDate(triggerDate.getDate() + i);
-
-            if (triggerDate > now) {
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
-                  body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
-                  sound: true,
-                },
-                trigger: { date: triggerDate } as any,
-              });
-            }
-          }
-        }
-        Alert.alert("¡Hecho!", "Notificaciones configuradas (Sonarán en la app final, no en Expo Go).");
-      } catch (expoError) {
-        Alert.alert("Guardado", "Horas guardadas correctamente. (Las alarmas sonarán cuando instales el APK final, Expo Go no las permite).");
-      }
-      
-      setAlarmModalVisible(false);
-    } catch (e) {
-      Alert.alert("Error", "No se pudieron guardar las alarmas.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    async function configurePushNotifications() {
-      try {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-        
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-        
-        if (finalStatus !== 'granted') return;
-
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('alarmas', {
-            name: 'Alarmas y Recordatorios',
-            importance: Notifications.AndroidImportance.MAX,
-          });
-        }
-
-        await Notifications.cancelAllScheduledNotificationsAsync();
-
-        const now = new Date();
-
-        for (const time of reminders) {
-          const [h, m] = time.split(':');
-          const targetHour = parseInt(h);
-          const targetMinute = parseInt(m);
-          const isNight = targetHour >= 20;
-
-          for (let i = 0; i < 7; i++) {
-            const triggerDate = new Date();
-            triggerDate.setHours(targetHour, targetMinute, 0, 0);
-            triggerDate.setDate(triggerDate.getDate() + i);
-
-            if (triggerDate > now) {
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
-                  body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
-                  sound: true,
-                },
-                trigger: { date: triggerDate } as any,
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.log("Expo Go bloquea notificaciones, saltando configuración automática.");
-      }
-    }
-
-    configurePushNotifications();
-  }, [reminders]);
-
   useEffect(() => {
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setMetaCalorias(data.metaCalorias || 2000);
         setMetaAgua(data.metaAgua || 2500);
-        if (data.reminders) setReminders(data.reminders);
       }
     });
 
@@ -345,7 +208,8 @@ export default function HomeScreen() {
     }
   };
 
-  const analyzeWithGemini = async (inputData: string, type: 'image' | 'food' | 'exercise') => {
+  // ✅ AÑADIDO: Soporte para 'recalculate' en la función de la IA
+  const analyzeWithGemini = async (inputData: string, type: 'image' | 'food' | 'exercise' | 'recalculate') => {
     setLoading(true);
     try {
       const cleanApiKey = GEMINI_API_KEY.trim();
@@ -360,9 +224,9 @@ export default function HomeScreen() {
                      Si logras identificar el producto exacto y la marca, utiliza tu base de datos de conocimiento para dar los valores nutricionales ESTÁNDAR de ese producto (ej: 2 sobaos hacendado son 66g y tienen X calorías). El nombre debe incluir la marca.
                   
                   2. ESTIMACIÓN VISUAL DE VOLUMEN (Solo si la prioridad 1 falla):
-                     Si es un alimento casero o no branded (ej: un plato de arroz o dos sobaos caseros sin marca), usa el proceso visual:
-                     a. Busca referencias de tamaño (bordes del plato, cubiertos).
-                     b. Desglosa ingredientes y calcula su volumen (ej. una ración de arroz).
+                     Si es un alimento casero o no branded, usa el proceso visual:
+                     a. Busca referencias de tamaño.
+                     b. Desglosa ingredientes y calcula su volumen.
                      c. Convierte esos volúmenes a gramos y calcula los macros totales del PLATO COMPLETO. NUNCA uses los valores base de 100g como resultado final.
                   
                   Puedes escribir todo tu razonamiento paso a paso, pero AL FINAL de tu respuesta, debes incluir ESTRICTAMENTE un JSON válido con este formato exacto:
@@ -370,6 +234,13 @@ export default function HomeScreen() {
         payloadContents = [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: inputData } }] }];
       } else if (type === 'exercise') {
         prompt = `Calcula calorías quemadas por: "${inputData}". Devuelve JSON: {"food_name": "🏃‍♂️ Nombre ejercicio", "calories": número NEGATIVO, "protein": 0, "carbs": 0, "fat": 0}`;
+        payloadContents = [{ parts: [{ text: prompt }] }];
+      } else if (type === 'recalculate') {
+        // ✅ EL NUEVO PROMPT MATEMÁTICO: Solo lee el nombre nuevo y recalcula
+        prompt = `Actúa como un nutricionista experto. Calcula los macronutrientes exactos para la siguiente cantidad y alimento: "${inputData}".
+                  Busca en tu base de datos la información nutricional de este producto específico y haz la regla de tres matemática exacta para la cantidad o gramos indicados en el texto.
+                  Devuelve ESTRICTAMENTE un JSON válido con esta estructura:
+                  {"food_name": "${inputData}", "calories": número, "protein": número, "carbs": número, "fat": número}`;
         payloadContents = [{ parts: [{ text: prompt }] }];
       }
       
@@ -397,10 +268,17 @@ export default function HomeScreen() {
       
       const macros = JSON.parse(text);
       
-      setPendingFood({
-        id: '', name: macros.food_name, calories: macros.calories, protein: macros.protein, carbs: macros.carbs, fat: macros.fat,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), imageBase64: type === 'image' ? inputData : '' 
-      });
+      // ✅ Si estamos recalculando, no perdemos la foto original que subió el usuario ni la hora
+      setPendingFood(prev => ({
+        id: '', 
+        name: macros.food_name, 
+        calories: macros.calories, 
+        protein: macros.protein, 
+        carbs: macros.carbs, 
+        fat: macros.fat,
+        time: prev?.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+        imageBase64: type === 'image' ? inputData : (prev?.imageBase64 || '')
+      }));
     } catch (error: any) { 
       Alert.alert("Error de IA Detallado", `No pudimos analizar la información.\n\nDetalles técnicos:\n${error.message}`); 
     } finally { setLoading(false); }
@@ -495,14 +373,9 @@ export default function HomeScreen() {
         
         <View style={styles.header}>
           <Text style={styles.logoText}>🍏 CuentaCal</Text>
-          <View style={styles.headerRightControls}>
-            <TouchableOpacity onPress={() => setAlarmModalVisible(true)} style={styles.bellIconBtn}>
-              <Bell size={24} color="#0047AB" />
-            </TouchableOpacity>
-            <View style={styles.fireBadge}>
-              <Flame size={16} color="#0047AB" fill="#0047AB" style={{marginRight: 4}} />
-              <Text style={styles.fireText}>{streak}</Text>
-            </View>
+          <View style={styles.fireBadge}>
+            <Flame size={16} color="#0047AB" fill="#0047AB" style={{marginRight: 4}} />
+            <Text style={styles.fireText}>{streak}</Text>
           </View>
         </View>
 
@@ -602,73 +475,9 @@ export default function HomeScreen() {
       {loading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#0047AB" />
-          <Text style={styles.loadingText}>Cargando...</Text>
+          <Text style={styles.loadingText}>Calculando con IA...</Text>
         </View>
       )}
-
-      <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
-        <View style={styles.editModalOverlay}>
-          <View style={styles.editModalContent}>
-            <Text style={styles.editTitle}>Tus Alarmas</Text>
-            <Text style={styles.helpText}>Personaliza cuándo quieres que te avisemos (Formato 24h)</Text>
-
-            <ScrollView style={{maxHeight: 200, marginBottom: 15}}>
-              {reminders.sort().map((time, index) => (
-                <View key={index} style={styles.recentItem}>
-                  <View style={styles.recentDetails}>
-                    <Text style={[styles.recentName, { fontSize: 18 }]}>⏰ {time}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setReminders(reminders.filter((_, i) => i !== index))}>
-                    <Trash2 size={24} color="#FF6B6B" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              {reminders.length === 0 && <Text style={{textAlign: 'center', color: '#6699CC', fontStyle: 'italic'}}>No tienes alarmas activas.</Text>}
-            </ScrollView>
-
-            <View style={styles.editRow}>
-              <TextInput
-                style={[styles.inputField, { flex: 1, marginRight: 10, textAlign: 'center', fontSize: 18 }]}
-                placeholder="Ej: 1430"
-                value={newAlarm}
-                keyboardType="number-pad"
-                maxLength={5}
-                onChangeText={(text) => {
-                  let val = text.replace(/[^0-9]/g, '');
-                  if (val.length > 2) {
-                    val = val.substring(0, 2) + ':' + val.substring(2, 4);
-                  }
-                  setNewAlarm(val);
-                }}
-              />
-              <TouchableOpacity
-                style={[styles.saveButton, { width: 'auto', paddingHorizontal: 20 }]}
-                onPress={() => {
-                  if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newAlarm)) {
-                    if (!reminders.includes(newAlarm)) {
-                      setReminders([...reminders, newAlarm]);
-                    }
-                    setNewAlarm('');
-                  } else {
-                    Alert.alert("Formato inválido", "Escribe 4 números (ej: 0930 o 1400)");
-                  }
-                }}
-              >
-                <Text style={styles.saveButtonText}>Añadir</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.editButtonsRow}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setAlarmModalVisible(false)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={saveAndScheduleAlarms}>
-                <Text style={styles.saveButtonText}>Guardar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       <Modal visible={scannerVisible} animationType="slide" transparent={false}>
         <View style={styles.scannerContainer}>
@@ -688,15 +497,19 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* ✅ AQUÍ ESTÁ LA NUEVA DRAFT CARD ACTUALIZADA */}
       <Modal visible={!!pendingFood} transparent={true} animationType="slide">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
             <Text style={styles.editTitle}>✨ Análisis de la IA</Text>
-            <Text style={styles.helpText}>Comprueba la estimación del plato completo y edita si lo ves necesario.</Text>
+            <Text style={styles.helpText}>Si los gramos son incorrectos, cámbialos en el nombre y dale a "Recalcular".</Text>
             
-            <Text style={styles.inputLabel}>Nombre del alimento/ejercicio</Text>
-            <TextInput style={styles.inputField} value={pendingFood?.name} onChangeText={(t) => setPendingFood(prev => prev ? {...prev, name: t} : null)} />
+            <Text style={styles.inputLabel}>Nombre del alimento y cantidad</Text>
+            <TextInput 
+              style={styles.inputField} 
+              value={pendingFood?.name} 
+              onChangeText={(t) => setPendingFood(prev => prev ? {...prev, name: t} : null)} 
+            />
+            
             <View style={styles.editRow}>
               <View style={styles.editColumn}>
                 <Text style={styles.inputLabel}>Calorías</Text>
@@ -717,10 +530,23 @@ export default function HomeScreen() {
                 <TextInput style={styles.inputField} keyboardType="numeric" value={pendingFood?.fat.toString()} onChangeText={(t) => setPendingFood(prev => prev ? {...prev, fat: Number(t)} : null)} />
               </View>
             </View>
-            <View style={styles.editButtonsRow}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setPendingFood(null)}><Text style={styles.cancelButtonText}>Descartar</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={confirmAndSaveFood}><Text style={styles.saveButtonText}>Guardar</Text></TouchableOpacity>
+
+            {/* ✅ AQUÍ ESTÁN LOS 3 BOTONES NUEVOS */}
+            <View style={styles.editButtonsRow3}>
+              <TouchableOpacity style={styles.cancelButton3} onPress={() => setPendingFood(null)}>
+                <Text style={styles.cancelButtonText3}>Descartar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.recalcButton3} onPress={() => pendingFood?.name && analyzeWithGemini(pendingFood.name, 'recalculate')}>
+                <RefreshCw size={16} color="#FFFFFF" style={{marginBottom: 2}} />
+                <Text style={styles.recalcButtonText3}>Recalcular</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.saveButton3} onPress={confirmAndSaveFood}>
+                <Text style={styles.saveButtonText3}>Guardar</Text>
+              </TouchableOpacity>
             </View>
+
           </View>
         </View>
       </Modal>
@@ -806,8 +632,6 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F0F8FF' }, 
   scrollContainer: { padding: 20, paddingTop: 50, paddingBottom: 100 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  headerRightControls: { flexDirection: 'row', alignItems: 'center' },
-  bellIconBtn: { marginRight: 15, padding: 5 },
   logoText: { fontSize: 28, fontWeight: '900', color: '#003366' },
   fireBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#E6F0FA' },
   fireText: { fontSize: 16, fontWeight: 'bold', color: '#0047AB' },
@@ -862,11 +686,22 @@ const styles = StyleSheet.create({
   inputField: { backgroundColor: '#F0F8FF', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 12, padding: 12, fontSize: 16, color: '#003366', marginBottom: 15 },
   editRow: { flexDirection: 'row', justifyContent: 'space-between' },
   editColumn: { width: '48%' },
+  
   editButtonsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   cancelButton: { paddingVertical: 15, width: '48%', borderRadius: 12, backgroundColor: '#E6F0FA', alignItems: 'center' },
   cancelButtonText: { color: '#0047AB', fontWeight: 'bold', fontSize: 16 },
   saveButton: { paddingVertical: 15, width: '48%', borderRadius: 12, backgroundColor: '#0047AB', alignItems: 'center', justifyContent: 'center' },
   saveButtonText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 },
+
+  // Nuevos estilos para los 3 botones en línea
+  editButtonsRow3: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
+  cancelButton3: { paddingVertical: 12, width: '31%', borderRadius: 12, backgroundColor: '#E6F0FA', alignItems: 'center', justifyContent: 'center' },
+  cancelButtonText3: { color: '#0047AB', fontWeight: 'bold', fontSize: 13 },
+  recalcButton3: { paddingVertical: 12, width: '34%', borderRadius: 12, backgroundColor: '#4C8BF5', alignItems: 'center', justifyContent: 'center' },
+  recalcButtonText3: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 13 },
+  saveButton3: { paddingVertical: 12, width: '31%', borderRadius: 12, backgroundColor: '#003366', alignItems: 'center', justifyContent: 'center' },
+  saveButtonText3: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 13 },
+
   darkModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'flex-end' },
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 110 },
   gridBox: { backgroundColor: '#FFFFFF', width: '47%', aspectRatio: 1, borderRadius: 28, justifyContent: 'center', alignItems: 'center', marginBottom: 16, padding: 15 },
