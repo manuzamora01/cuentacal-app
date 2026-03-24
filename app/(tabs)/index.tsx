@@ -5,6 +5,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase'; 
+// ✅ Importamos el módulo de notificaciones
+import * as Notifications from 'expo-notifications';
+
+// ✅ Configuramos cómo se comportan las notificaciones si estás usando la app en ese momento
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 interface FoodItem {
   id: string;
@@ -27,7 +38,7 @@ interface WaterLog {
 }
 
 // 🔑 PON TU API KEY DE GEMINI AQUÍ
-const GEMINI_API_KEY = "AIzaSyCeUyNhP-7rnVzMTdjOe4W2WId_ZptYmBE";
+const GEMINI_API_KEY = "PEGA_AQUI_TU_API_KEY_DE_GEMINI";
 
 const formatCustomDate = (date: Date) => {
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -61,7 +72,6 @@ export default function HomeScreen() {
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Aseguramos que siempre devuelve la estructura correcta {days: [], headerText: ''}
   const weekData = useMemo(() => {
     const today = new Date();
     today.setDate(today.getDate() + (weekOffset * 7));
@@ -96,6 +106,51 @@ export default function HomeScreen() {
 
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
+
+  // ✅ NUEVO useEffect: Configuración de Notificaciones
+  useEffect(() => {
+    async function configurePushNotifications() {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        return; // Si el usuario dice que no, no hacemos nada.
+      }
+
+      // Borramos las alarmas viejas para no acumularlas
+      await Notifications.cancelAllScheduledNotificationsAsync();
+
+      // Programamos recordatorios de agua diarios
+      const waterHours = [10, 14, 18];
+      for (const hour of waterHours) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "💧 ¡Hora de hidratarse!",
+            body: "Un pequeño trago de agua te acerca a tu meta diaria.",
+            sound: true,
+          },
+          trigger: { hour: hour, minute: 0, repeats: true } as any,
+        });
+      }
+
+      // Programamos recordatorio de cierre del día
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "🍏 Cierre del día",
+          body: "¿Has registrado todas tus comidas? ¡No pierdas tu racha de fuego!",
+          sound: true,
+        },
+        trigger: { hour: 21, minute: 0, repeats: true } as any,
+      });
+    }
+
+    configurePushNotifications();
+  }, []);
 
   useEffect(() => {
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
@@ -147,7 +202,6 @@ export default function HomeScreen() {
     setStreak(currentStreak);
   }, [foodList, waterList]);
 
-  // Protección para asegurar que filter y map no fallen si uniqueSavedFoods calcula algo raro
   const uniqueSavedFoods = Array.from(new Map((foodList || []).filter(f => f.calories > 0).map(item => [item.name, item])).values());
 
   const dailyFoods = (foodList || []).filter(food => food.jsDate && food.jsDate.toDateString() === selectedDate.toDateString());
@@ -346,7 +400,6 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.calendarRow}>
-          {/* ✅ Seguro antiquiebres por caché: (weekData.days || []) */}
           {(weekData.days || []).map((day, index) => (
              <TouchableOpacity key={index} style={styles.calendarDay} onPress={() => setSelectedDate(day.fullDate)}>
                <Text style={[styles.calendarDayText, day.isTodayReal && {color: '#0047AB', fontWeight: 'bold'}]}>{day.letter}</Text>
@@ -436,7 +489,6 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* MODAL: LA CÁMARA DEL ESCÁNER */}
       <Modal visible={scannerVisible} animationType="slide" transparent={false}>
         <View style={styles.scannerContainer}>
           <Text style={styles.scannerTitle}>Escanea un código de barras</Text>
@@ -515,7 +567,6 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.cancelButton} onPress={() => setWaterModalVisible(false)}><Text style={styles.cancelButtonText}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={saveCustomWater}><Text style={styles.saveButtonText}>Guardar</Text></TouchableOpacity>
             </View>
-            {/* ✅ Sintaxis JSX del Agua completamente limpia */}
             {dailyWaterLogs.length > 0 && (
               <TouchableOpacity style={{marginTop: 20, alignItems: 'center'}} onPress={undoLastWater}>
                 <Text style={{color: '#FF6B6B', fontWeight: 'bold', fontSize: 14}}>Deshacer último registro</Text>
