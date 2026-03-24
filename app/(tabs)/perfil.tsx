@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { User, Target, Activity, Edit3, Scale, Flame, Droplets, ChevronRight, X } from 'lucide-react-native';
+import { User, Target, Activity, Edit3, Scale, Flame, Droplets, ChevronRight, X, TrendingDown } from 'lucide-react-native';
 import { doc, getDoc, setDoc, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -33,7 +33,6 @@ export default function ProfileScreen() {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const dbData = docSnap.data();
-        // ✅ PARACAÍDAS: Mezclamos datos viejos con los nuevos para evitar valores "undefined"
         const mergedData = { 
           gender: dbData.gender || 'male',
           age: dbData.age || 25,
@@ -129,7 +128,6 @@ export default function ProfileScreen() {
       setForm(finalData);
       setWeightModalVisible(false);
       setNewWeight('');
-      Alert.alert("¡Peso registrado!", "Tus calorías se han ajustado automáticamente a tu nuevo peso.");
     } catch (error) {
       Alert.alert("Error", "No se guardó el peso.");
     }
@@ -151,12 +149,25 @@ export default function ProfileScreen() {
   let progressPercent = totalDiff === 0 ? 100 : Math.max(0, Math.min(100, ((totalDiff - currentDiff) / totalDiff) * 100));
   if (isGoalReached) progressPercent = 100;
 
+  // 📊 LÓGICA DE LA GRÁFICA DE TENDENCIAS
+  // Cogemos los últimos 7 pesajes y los ordenamos de más antiguo a más nuevo
+  const chartData = [...weightHistory].slice(0, 7).reverse();
+  const maxChartWeight = chartData.length > 0 ? Math.max(...chartData.map(d => d.weight), userData.targetWeight) + 1 : 0;
+  const minChartWeight = chartData.length > 0 ? Math.min(...chartData.map(d => d.weight), userData.targetWeight) - 1 : 0;
+  const chartRange = maxChartWeight - minChartWeight;
+
+  const formatDateShort = (dateObj: any) => {
+    if (!dateObj) return '';
+    const d = dateObj.toDate ? dateObj.toDate() : new Date(dateObj);
+    return `${d.getDate()}/${d.getMonth()+1}`;
+  };
+
   if (loading) {
     return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#0047AB" /></View>;
   }
 
   return (
-    <ScrollView style={styles.mainContainer} contentContainerStyle={{paddingBottom: 100}}>
+    <ScrollView style={styles.mainContainer} contentContainerStyle={{paddingBottom: 100}} showsVerticalScrollIndicator={false}>
       
       <View style={styles.header}>
         <View style={styles.profileInfo}>
@@ -221,21 +232,39 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* 📊 NUEVA SECCIÓN: GRÁFICA DE EVOLUCIÓN */}
       <View style={styles.historyHeader}>
-        <Text style={styles.sectionTitle}>Historial de pesajes</Text>
+        <Text style={styles.sectionTitle}>Evolución de Peso</Text>
       </View>
       
-      {weightHistory.length === 0 ? (
-        <Text style={styles.emptyText}>Aún no has registrado pesajes.</Text>
-      ) : (
-        weightHistory.slice(0, 5).map((log, i) => (
-          <View key={log.id} style={styles.historyItem}>
-            <View style={styles.historyDot} />
-            <Text style={styles.historyDate}>{log.date?.toDate ? log.date.toDate().toLocaleDateString() : 'Hoy'}</Text>
-            <Text style={styles.historyWeight}>{log.weight} kg</Text>
+      <View style={styles.chartCard}>
+        {chartData.length < 2 ? (
+          <View style={styles.emptyChart}>
+            <TrendingDown size={32} color="#B3D4FF" style={{marginBottom: 10}}/>
+            <Text style={styles.emptyText}>Registra tu peso al menos dos días diferentes para ver tu curva de progreso.</Text>
           </View>
-        ))
-      )}
+        ) : (
+          <View style={styles.customChartContainer}>
+            {/* Línea Meta */}
+            <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]} />
+            <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]}>Meta</Text>
+
+            {/* Puntos de la gráfica */}
+            {chartData.map((log, index) => {
+              const xPos = `${(index / (chartData.length - 1)) * 90 + 5}%`; // Margen del 5% a los lados
+              const yPos = `${((log.weight - minChartWeight) / chartRange) * 100}%`;
+              
+              return (
+                <View key={log.id} style={[styles.chartPointWrapper, { left: xPos, bottom: yPos }]}>
+                  <View style={styles.chartDot} />
+                  <Text style={styles.chartDotText}>{log.weight}</Text>
+                  <Text style={styles.chartDateText}>{formatDateShort(log.date)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
 
       {/* MODAL CONFIGURACIÓN PERFIL */}
       <Modal visible={profileModalVisible} animationType="slide" transparent={true}>
@@ -363,40 +392,43 @@ const styles = StyleSheet.create({
   statDesc: { fontSize: 11, color: '#6699CC', textAlign: 'center', marginTop: 2, fontWeight: '600' },
 
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  emptyText: { color: '#6699CC', textAlign: 'center', marginTop: 10, fontStyle: 'italic' },
-  historyItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 15, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#E6F0FA' },
-  historyDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#4C8BF5', marginRight: 15 },
-  historyDate: { flex: 1, fontSize: 16, color: '#003366', fontWeight: 'bold' },
-  historyWeight: { fontSize: 18, fontWeight: '900', color: '#0047AB' },
+  
+  // Estilos de la nueva Gráfica
+  chartCard: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 24, borderWidth: 1, borderColor: '#B3D4FF', marginBottom: 30 },
+  emptyChart: { height: 180, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  emptyText: { color: '#6699CC', textAlign: 'center', fontStyle: 'italic', fontWeight: '500' },
+  customChartContainer: { height: 200, width: '100%', position: 'relative', marginTop: 20, marginBottom: 30 },
+  targetLineChart: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#FF6B6B', borderStyle: 'dashed', opacity: 0.4 },
+  targetLineLabel: { position: 'absolute', left: 0, fontSize: 10, color: '#FF6B6B', fontWeight: 'bold', marginTop: -15 },
+  chartPointWrapper: { position: 'absolute', alignItems: 'center', width: 40, marginLeft: -20, marginBottom: -6 },
+  chartDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#0047AB', borderWidth: 2, borderColor: '#FFFFFF', elevation: 3 },
+  chartDotText: { fontSize: 12, fontWeight: '900', color: '#003366', position: 'absolute', top: -20 },
+  chartDateText: { fontSize: 10, color: '#6699CC', fontWeight: 'bold', position: 'absolute', bottom: -22, width: 50, textAlign: 'center' },
 
+  // Modales
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 51, 102, 0.6)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: '#F0F8FF', borderRadius: 24, padding: 25, maxHeight: '90%' },
   smallModalContent: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 25 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 22, fontWeight: '900', color: '#003366' },
-  
   inputLabel: { fontSize: 13, color: '#003366', fontWeight: 'bold', marginBottom: 8 },
   inputField: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 12, padding: 15, fontSize: 16, color: '#003366', marginBottom: 15 },
   inputRow: { flexDirection: 'row', justifyContent: 'space-between' },
   inputHalf: { width: '48%' },
   sectionDivider: { fontSize: 18, fontWeight: '900', color: '#0047AB', marginTop: 10, marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#B3D4FF', paddingBottom: 5 },
   helpText: { fontSize: 11, color: '#6699CC', fontStyle: 'italic', marginBottom: 15, marginTop: -10 },
-
   radioRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   radioBtn: { flex: 1, padding: 15, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 12, alignItems: 'center', marginHorizontal: 5 },
   radioBtnActive: { backgroundColor: '#0047AB', borderColor: '#0047AB' },
   radioText: { color: '#003366', fontWeight: 'bold' },
   radioTextActive: { color: '#FFFFFF' },
-
   activityGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
   actBtn: { width: '48%', padding: 15, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#B3D4FF', borderRadius: 12, alignItems: 'center', marginBottom: 10 },
   actBtnActive: { backgroundColor: '#0047AB', borderColor: '#0047AB' },
   actText: { color: '#003366', fontWeight: 'bold', fontSize: 12, textAlign: 'center' },
   actTextActive: { color: '#FFFFFF' },
-
   saveMainBtn: { backgroundColor: '#4C8BF5', padding: 18, borderRadius: 16, alignItems: 'center', marginTop: 10, marginBottom: 20 },
   saveMainBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 },
-
   btnRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   cancelBtn: { padding: 15, flex: 1, backgroundColor: '#E6F0FA', borderRadius: 12, alignItems: 'center', marginRight: 10 },
   cancelBtnText: { color: '#0047AB', fontWeight: 'bold' },
