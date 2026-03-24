@@ -7,13 +7,18 @@ import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateD
 import { db } from '../../firebase'; 
 import * as Notifications from 'expo-notifications';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  } as any),
-});
+// Intentamos configurar el handler, ignorando el error si Expo Go lo rechaza
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    } as any),
+  });
+} catch (e) {
+  // Silenciado para Expo Go
+}
 
 interface FoodItem {
   id: string;
@@ -114,7 +119,6 @@ export default function HomeScreen() {
     try {
       await updateDoc(doc(db, "usuarios", "mi_perfil"), { reminders: reminders });
 
-      // Escudo protector contra el error de Expo Go
       try {
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== 'granted') {
@@ -148,7 +152,6 @@ export default function HomeScreen() {
         }
         Alert.alert("¡Hecho!", "Notificaciones configuradas (Sonarán en la app final, no en Expo Go).");
       } catch (expoError) {
-        // Si Expo Go bloquea las notificaciones, avisamos sin romper la app
         Alert.alert("Guardado", "Horas guardadas correctamente. (Las alarmas sonarán cuando instales el APK final, Expo Go no las permite).");
       }
       
@@ -159,6 +162,50 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
+
+  // ✅ AQUÍ ESTÁ EL ARREGLO: Silenciamos el error de Expo Go al cargar la pantalla
+  useEffect(() => {
+    async function configurePushNotifications() {
+      try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        
+        if (finalStatus !== 'granted') return;
+
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('alarmas', {
+            name: 'Alarmas y Recordatorios',
+            importance: Notifications.AndroidImportance.MAX,
+          });
+        }
+
+        await Notifications.cancelAllScheduledNotificationsAsync();
+
+        for (const time of reminders) {
+          const [h, m] = time.split(':');
+          const isNight = parseInt(h) >= 20;
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
+              body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
+              sound: true,
+            },
+            trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
+          });
+        }
+      } catch (e) {
+        // Silenciamos el error para que Expo Go no lance la pantalla roja al inicio
+        console.log("Expo Go bloquea notificaciones, saltando configuración automática.");
+      }
+    }
+
+    configurePushNotifications();
+  }, [reminders]); // Se vuelve a ejecutar si cambian los recordatorios
 
   useEffect(() => {
     const unsubProfile = onSnapshot(doc(db, "usuarios", "mi_perfil"), (docSnap) => {
@@ -393,7 +440,6 @@ export default function HomeScreen() {
         
         <View style={styles.header}>
           <Text style={styles.logoText}>🍏 CuentaCal</Text>
-          {/* ✅ AQUÍ ESTÁ EL NUEVO ICONO DE ALARMAS JUNTO A LA RACHA */}
           <View style={styles.headerRightControls}>
             <TouchableOpacity onPress={() => setAlarmModalVisible(true)} style={styles.bellIconBtn}>
               <Bell size={24} color="#0047AB" />
@@ -505,7 +551,6 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Modal de Configuración de Alarmas */}
       <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
@@ -679,7 +724,6 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      {/* ✅ Menú restaurado a 4 botones en perfecta cuadrícula 2x2 */}
       <Modal visible={isMenuVisible} transparent={true} animationType="fade">
         <View style={styles.darkModalOverlay}>
           <TouchableOpacity style={{flex: 1}} onPress={() => setIsMenuVisible(false)} />
