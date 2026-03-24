@@ -1,34 +1,42 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Home, LineChart, User } from 'lucide-react-native';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+    <Tabs 
+      screenOptions={{ 
+        tabBarActiveTintColor: '#0047AB', // Tu color azul activo
+        tabBarInactiveTintColor: '#6699CC', // Azul grisáceo inactivo
         headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#E6F0FA',
+          paddingBottom: 5,
+          paddingTop: 5,
+          height: 60
+        }
+      }}
+    >
+      <Tabs.Screen 
+        name="index" 
+        options={{ 
+          title: 'Inicio', 
+          tabBarIcon: ({ color }) => <Home size={24} color={color} /> 
+        }} 
       />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
-        }}
+      <Tabs.Screen 
+        name="progreso" 
+        options={{ 
+          title: 'Progreso', 
+          tabBarIcon: ({ color }) => <LineChart size={24} color={color} /> 
+        }} 
+      />
+      <Tabs.Screen 
+        name="perfil" 
+        options={{ 
+          title: 'Perfil', 
+          tabBarIcon: ({ color }) => <User size={24} color={color} /> 
+        }} 
       />
     </Tabs>
   );
