@@ -356,14 +356,20 @@ export default function HomeScreen() {
       let prompt = ""; let payloadContents: any[] = [];
 
       if (type === 'image') {
-        prompt = `Analiza esta imagen. Devuelve ESTRICTAMENTE un JSON válido: {"food_name": "Nombre", "calories": número, "protein": número, "carbs": número, "fat": número}`;
+        // ✅ PROMPT ESTRICTO: Obligamos a estimar la porción total servida
+        prompt = `Actúa como un nutricionista experto. Analiza la imagen e identifica todos los alimentos del plato. 
+                  MUY IMPORTANTE: NO devuelvas los valores por 100g. 
+                  Calcula visualmente la CANTIDAD TOTAL (en gramos o raciones) de lo que hay servido y devuelve los macronutrientes calculados para el PLATO COMPLETO.
+                  Devuelve ESTRICTAMENTE un JSON válido con esta estructura: 
+                  {"food_name": "Nombre del plato (aprox. Xg)", "calories": número, "protein": número, "carbs": número, "fat": número}`;
         payloadContents = [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: inputData } }] }];
       } else if (type === 'exercise') {
         prompt = `Calcula calorías quemadas por: "${inputData}". Devuelve JSON: {"food_name": "🏃‍♂️ Nombre ejercicio", "calories": número NEGATIVO, "protein": 0, "carbs": 0, "fat": 0}`;
         payloadContents = [{ parts: [{ text: prompt }] }];
       }
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${cleanApiKey}`, {
+      // ✅ IA MÁS POTENTE: Cambiado a gemini-2.5-pro para mejor razonamiento de cantidades
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${cleanApiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: payloadContents })
       });
