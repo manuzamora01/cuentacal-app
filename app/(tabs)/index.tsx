@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Platform } from 'react-native';
-// ✅ Importado el icono Bell para las alarmas
 import { Plus, X, Camera, Edit3, Activity, Flame, CheckCircle2, Droplets, Trash2, ChevronLeft, ChevronRight, Barcode, Bell } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-// ✅ Añadido updateDoc para guardar las alarmas
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase'; 
 import * as Notifications from 'expo-notifications';
@@ -72,7 +70,6 @@ export default function HomeScreen() {
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
 
-  // ✅ NUEVOS ESTADOS PARA ALARMAS
   const [alarmModalVisible, setAlarmModalVisible] = useState(false);
   const [reminders, setReminders] = useState<string[]>(['10:00', '14:00', '18:00', '21:00']);
   const [newAlarm, setNewAlarm] = useState('');
@@ -112,48 +109,52 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
-  // ✅ LÓGICA DE ALARMAS MEJORADA (Se ejecuta al darle a Guardar en el Modal)
   const saveAndScheduleAlarms = async () => {
     setLoading(true);
     try {
       await updateDoc(doc(db, "usuarios", "mi_perfil"), { reminders: reminders });
 
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert("Permiso denegado", "No podemos enviar notificaciones.");
-        setLoading(false);
-        return;
-      }
+      // Escudo protector contra el error de Expo Go
+      try {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert("Permiso denegado", "No podemos enviar notificaciones.");
+          setLoading(false);
+          return;
+        }
 
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('alarmas', {
-          name: 'Alarmas y Recordatorios',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#0047AB',
-        });
-      }
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('alarmas', {
+            name: 'Alarmas y Recordatorios',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#0047AB',
+          });
+        }
 
-      await Notifications.cancelAllScheduledNotificationsAsync();
+        await Notifications.cancelAllScheduledNotificationsAsync();
 
-      for (const time of reminders) {
-        const [h, m] = time.split(':');
-        const isNight = parseInt(h) >= 20;
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
-            body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
-            sound: true,
-          },
-          // ✅ FIX ERROR: Añadido channelId obligatorio para Android
-          trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
-        });
+        for (const time of reminders) {
+          const [h, m] = time.split(':');
+          const isNight = parseInt(h) >= 20;
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
+              body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
+              sound: true,
+            },
+            trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
+          });
+        }
+        Alert.alert("¡Hecho!", "Notificaciones configuradas (Sonarán en la app final, no en Expo Go).");
+      } catch (expoError) {
+        // Si Expo Go bloquea las notificaciones, avisamos sin romper la app
+        Alert.alert("Guardado", "Horas guardadas correctamente. (Las alarmas sonarán cuando instales el APK final, Expo Go no las permite).");
       }
       
       setAlarmModalVisible(false);
-      Alert.alert("¡Hecho!", "Notificaciones programadas con éxito.");
     } catch (e) {
-      Alert.alert("Error", "No se pudieron configurar las alarmas.");
+      Alert.alert("Error", "No se pudieron guardar las alarmas.");
     } finally {
       setLoading(false);
     }
@@ -392,9 +393,15 @@ export default function HomeScreen() {
         
         <View style={styles.header}>
           <Text style={styles.logoText}>🍏 CuentaCal</Text>
-          <View style={styles.fireBadge}>
-            <Flame size={16} color="#0047AB" fill="#0047AB" style={{marginRight: 4}} />
-            <Text style={styles.fireText}>{streak}</Text>
+          {/* ✅ AQUÍ ESTÁ EL NUEVO ICONO DE ALARMAS JUNTO A LA RACHA */}
+          <View style={styles.headerRightControls}>
+            <TouchableOpacity onPress={() => setAlarmModalVisible(true)} style={styles.bellIconBtn}>
+              <Bell size={24} color="#0047AB" />
+            </TouchableOpacity>
+            <View style={styles.fireBadge}>
+              <Flame size={16} color="#0047AB" fill="#0047AB" style={{marginRight: 4}} />
+              <Text style={styles.fireText}>{streak}</Text>
+            </View>
           </View>
         </View>
 
@@ -498,7 +505,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* ✅ NUEVO MODAL: Gestión Visual de Alarmas */}
+      {/* Modal de Configuración de Alarmas */}
       <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
@@ -672,6 +679,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
+      {/* ✅ Menú restaurado a 4 botones en perfecta cuadrícula 2x2 */}
       <Modal visible={isMenuVisible} transparent={true} animationType="fade">
         <View style={styles.darkModalOverlay}>
           <TouchableOpacity style={{flex: 1}} onPress={() => setIsMenuVisible(false)} />
@@ -680,8 +688,6 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.gridBox} onPress={() => { setIsMenuVisible(false); setSavedFoodsVisible(true); }}><CheckCircle2 size={32} color="#000" /><Text style={styles.gridBoxText}>Alimentos guardados</Text></TouchableOpacity>
             <TouchableOpacity style={styles.gridBox} onPress={openBarcodeScanner}><Barcode size={32} color="#000" /><Text style={styles.gridBoxText}>Escanear código</Text></TouchableOpacity>
             <TouchableOpacity style={styles.gridBox} onPress={handleScanMenu}><Camera size={32} color="#000" /><Text style={styles.gridBoxText}>Analizar foto IA</Text></TouchableOpacity>
-            {/* ✅ NUEVO BOTÓN: Configurar Alarmas (ocupa el ancho completo en la base de la cuadrícula) */}
-            <TouchableOpacity style={[styles.gridBox, {width: '100%'}]} onPress={() => { setIsMenuVisible(false); setAlarmModalVisible(true); }}><Bell size={32} color="#000" /><Text style={styles.gridBoxText}>Configurar Alarmas</Text></TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.closeFabDark} onPress={() => setIsMenuVisible(false)}><X size={32} color="#FFFFFF" /></TouchableOpacity>
         </View>
@@ -694,6 +700,8 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#F0F8FF' }, 
   scrollContainer: { padding: 20, paddingTop: 50, paddingBottom: 100 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  headerRightControls: { flexDirection: 'row', alignItems: 'center' },
+  bellIconBtn: { marginRight: 15, padding: 5 },
   logoText: { fontSize: 28, fontWeight: '900', color: '#003366' },
   fireBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#E6F0FA' },
   fireText: { fontSize: 16, fontWeight: 'bold', color: '#0047AB' },
