@@ -7,7 +7,6 @@ import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, updateD
 import { db } from '../../firebase'; 
 import * as Notifications from 'expo-notifications';
 
-// ✅ SILENCIADOR DEFINITIVO: Ocultamos el aviso rojo de Expo Go para poder trabajar en paz
 LogBox.ignoreLogs(['expo-notifications: Android Push notifications']);
 
 try {
@@ -116,6 +115,7 @@ export default function HomeScreen() {
     return { days: calculatedDays, headerText: text };
   }, [selectedDate, weekOffset]); 
 
+  // ✅ SOLUCIÓN: Lógica de 7 días exactos para evitar bombardeo de notificaciones
   const saveAndScheduleAlarms = async () => {
     setLoading(true);
     try {
@@ -140,17 +140,33 @@ export default function HomeScreen() {
 
         await Notifications.cancelAllScheduledNotificationsAsync();
 
+        const now = new Date();
+
         for (const time of reminders) {
           const [h, m] = time.split(':');
-          const isNight = parseInt(h) >= 20;
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
-              body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
-              sound: true,
-            },
-            trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
-          });
+          const targetHour = parseInt(h);
+          const targetMinute = parseInt(m);
+          const isNight = targetHour >= 20;
+
+          // Programamos el aviso para los próximos 7 días
+          for (let i = 0; i < 7; i++) {
+            const triggerDate = new Date();
+            triggerDate.setHours(targetHour, targetMinute, 0, 0);
+            triggerDate.setDate(triggerDate.getDate() + i);
+
+            // Solo programar si la hora exacta es estrictamente en el futuro
+            if (triggerDate > now) {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
+                  body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
+                  sound: true,
+                },
+                // Ahora usamos fecha exacta en lugar de repetición diaria
+                trigger: { date: triggerDate } as any,
+              });
+            }
+          }
         }
         Alert.alert("¡Hecho!", "Notificaciones configuradas (Sonarán en la app final, no en Expo Go).");
       } catch (expoError) {
@@ -187,17 +203,30 @@ export default function HomeScreen() {
 
         await Notifications.cancelAllScheduledNotificationsAsync();
 
+        const now = new Date();
+
         for (const time of reminders) {
           const [h, m] = time.split(':');
-          const isNight = parseInt(h) >= 20;
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
-              body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
-              sound: true,
-            },
-            trigger: { hour: parseInt(h), minute: parseInt(m), repeats: true, channelId: 'alarmas' } as any,
-          });
+          const targetHour = parseInt(h);
+          const targetMinute = parseInt(m);
+          const isNight = targetHour >= 20;
+
+          for (let i = 0; i < 7; i++) {
+            const triggerDate = new Date();
+            triggerDate.setHours(targetHour, targetMinute, 0, 0);
+            triggerDate.setDate(triggerDate.getDate() + i);
+
+            if (triggerDate > now) {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: isNight ? "🍏 Cierre del día" : "💧 ¡Hora de hidratarse!",
+                  body: isNight ? "¿Has registrado todas tus comidas de hoy?" : "Un pequeño trago de agua te acerca a tu meta.",
+                  sound: true,
+                },
+                trigger: { date: triggerDate } as any,
+              });
+            }
+          }
         }
       } catch (e) {
         console.log("Expo Go bloquea notificaciones, saltando configuración automática.");
@@ -551,7 +580,6 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* MODAL CONFIGURACIÓN ALARMAS */}
       <Modal visible={alarmModalVisible} transparent={true} animationType="fade">
         <View style={styles.editModalOverlay}>
           <View style={styles.editModalContent}>
@@ -573,7 +601,6 @@ export default function HomeScreen() {
             </ScrollView>
 
             <View style={styles.editRow}>
-              {/* ✅ AQUÍ ESTÁ LA MAGIA DEL AUTO-FORMATO */}
               <TextInput
                 style={[styles.inputField, { flex: 1, marginRight: 10, textAlign: 'center', fontSize: 18 }]}
                 placeholder="Ej: 1430"
@@ -581,9 +608,7 @@ export default function HomeScreen() {
                 keyboardType="number-pad"
                 maxLength={5}
                 onChangeText={(text) => {
-                  // Eliminamos todo lo que no sea número
                   let val = text.replace(/[^0-9]/g, '');
-                  // Añadimos los dos puntos automáticamente
                   if (val.length > 2) {
                     val = val.substring(0, 2) + ':' + val.substring(2, 4);
                   }
