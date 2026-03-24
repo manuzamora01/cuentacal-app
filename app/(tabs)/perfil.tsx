@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { User, Target, Activity, Edit3, Scale, Flame, Droplets, ChevronRight, X, TrendingDown } from 'lucide-react-native';
-import { doc, getDoc, setDoc, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+// ✅ Importaciones añadidas: updateDoc y deleteDoc
+import { doc, getDoc, setDoc, collection, addDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 export default function ProfileScreen() {
@@ -106,6 +107,7 @@ export default function ProfileScreen() {
     }
   };
 
+  // ✅ LOGICA MEJORADA: Comprobar si ya existe un peso de hoy
   const logNewWeight = async () => {
     const weight = parseFloat(newWeight);
     if (isNaN(weight) || weight <= 0) {
@@ -118,10 +120,20 @@ export default function ProfileScreen() {
     const finalData = { ...updatedData, ...newTargets };
 
     try {
-      await addDoc(collection(db, "usuarios/mi_perfil/historial_peso"), {
-        weight: weight,
-        date: new Date()
+      const todayString = new Date().toDateString();
+      const existingEntry = weightHistory.find(log => {
+        const logDate = log.date?.toDate ? log.date.toDate() : new Date(log.date);
+        return logDate.toDateString() === todayString;
       });
+
+      if (existingEntry) {
+        // Actualizar el peso de hoy en vez de crear uno nuevo
+        await updateDoc(doc(db, "usuarios/mi_perfil/historial_peso", existingEntry.id), { weight: weight });
+      } else {
+        // Crear un registro nuevo si hoy no hay nada
+        await addDoc(collection(db, "usuarios/mi_perfil/historial_peso"), { weight: weight, date: new Date() });
+      }
+
       await setDoc(doc(db, "usuarios", "mi_perfil"), finalData);
       
       setUserData(finalData);
@@ -131,6 +143,36 @@ export default function ProfileScreen() {
     } catch (error) {
       Alert.alert("Error", "No se guardó el peso.");
     }
+  };
+
+  // ✅ NUEVA FUNCIÓN: Borrar un peso desde la gráfica
+  const deleteWeightPrompt = (id: string, weight: number) => {
+    Alert.alert(
+      "Borrar registro", 
+      `¿Quieres eliminar el pesaje de ${weight} kg?`, 
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Borrar", style: "destructive", onPress: async () => {
+            try {
+              await deleteDoc(doc(db, "usuarios/mi_perfil/historial_peso", id));
+              
+              // Inteligencia extra: Si borraste el peso más reciente, volvemos al anterior
+              if (weightHistory.length > 1 && weightHistory[0].id === id) {
+                const previousWeight = weightHistory[1].weight;
+                const updatedData = { ...userData, currentWeight: previousWeight };
+                const newTargets = calculateTargets(updatedData);
+                const finalData = { ...updatedData, ...newTargets };
+                
+                await setDoc(doc(db, "usuarios", "mi_perfil"), finalData);
+                setUserData(finalData);
+                setForm(finalData);
+              }
+            } catch(e) { 
+              Alert.alert("Error", "No se pudo borrar el registro."); 
+            }
+        }}
+      ]
+    );
   };
 
   const imc = (userData.currentWeight / Math.pow(userData.height / 100, 2)).toFixed(1);
@@ -149,8 +191,6 @@ export default function ProfileScreen() {
   let progressPercent = totalDiff === 0 ? 100 : Math.max(0, Math.min(100, ((totalDiff - currentDiff) / totalDiff) * 100));
   if (isGoalReached) progressPercent = 100;
 
-  // 📊 LÓGICA DE LA GRÁFICA DE TENDENCIAS
-  // Cogemos los últimos 7 pesajes y los ordenamos de más antiguo a más nuevo
   const chartData = [...weightHistory].slice(0, 7).reverse();
   const maxChartWeight = chartData.length > 0 ? Math.max(...chartData.map(d => d.weight), userData.targetWeight) + 1 : 0;
   const minChartWeight = chartData.length > 0 ? Math.min(...chartData.map(d => d.weight), userData.targetWeight) - 1 : 0;
@@ -232,7 +272,6 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* 📊 NUEVA SECCIÓN: GRÁFICA DE EVOLUCIÓN */}
       <View style={styles.historyHeader}>
         <Text style={styles.sectionTitle}>Evolución de Peso</Text>
       </View>
@@ -244,25 +283,32 @@ export default function ProfileScreen() {
             <Text style={styles.emptyText}>Registra tu peso al menos dos días diferentes para ver tu curva de progreso.</Text>
           </View>
         ) : (
-          <View style={styles.customChartContainer}>
-            {/* Línea Meta */}
-            <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]} />
-            <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]}>Meta</Text>
+          <>
+            <Text style={styles.chartHintText}>Toca un punto para gestionar el registro</Text>
+            <View style={styles.customChartContainer}>
+              <View style={[styles.targetLineChart, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]} />
+              <Text style={[styles.targetLineLabel, { bottom: `${((userData.targetWeight - minChartWeight) / chartRange) * 100}%` }]}>Meta</Text>
 
-            {/* Puntos de la gráfica */}
-            {chartData.map((log, index) => {
-              const xPos = `${(index / (chartData.length - 1)) * 90 + 5}%`; // Margen del 5% a los lados
-              const yPos = `${((log.weight - minChartWeight) / chartRange) * 100}%`;
-              
-              return (
-                <View key={log.id} style={[styles.chartPointWrapper, { left: xPos, bottom: yPos }]}>
-                  <View style={styles.chartDot} />
-                  <Text style={styles.chartDotText}>{log.weight}</Text>
-                  <Text style={styles.chartDateText}>{formatDateShort(log.date)}</Text>
-                </View>
-              );
-            })}
-          </View>
+              {chartData.map((log, index) => {
+                const xPos = `${(index / (chartData.length - 1)) * 90 + 5}%`; 
+                const yPos = `${((log.weight - minChartWeight) / chartRange) * 100}%`;
+                
+                return (
+                  // ✅ Cambiado a TouchableOpacity con hitSlop para que sea fácil de pulsar
+                  <TouchableOpacity 
+                    key={log.id} 
+                    style={[styles.chartPointWrapper, { left: xPos, bottom: yPos }]}
+                    onPress={() => deleteWeightPrompt(log.id, log.weight)}
+                    hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}
+                  >
+                    <View style={styles.chartDot} />
+                    <Text style={styles.chartDotText}>{log.weight}</Text>
+                    <Text style={styles.chartDateText}>{formatDateShort(log.date)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
         )}
       </View>
 
@@ -393,10 +439,10 @@ const styles = StyleSheet.create({
 
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   
-  // Estilos de la nueva Gráfica
   chartCard: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 24, borderWidth: 1, borderColor: '#B3D4FF', marginBottom: 30 },
   emptyChart: { height: 180, justifyContent: 'center', alignItems: 'center', padding: 20 },
   emptyText: { color: '#6699CC', textAlign: 'center', fontStyle: 'italic', fontWeight: '500' },
+  chartHintText: { fontSize: 11, color: '#6699CC', textAlign: 'center', fontStyle: 'italic', marginBottom: 5 },
   customChartContainer: { height: 200, width: '100%', position: 'relative', marginTop: 20, marginBottom: 30 },
   targetLineChart: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#FF6B6B', borderStyle: 'dashed', opacity: 0.4 },
   targetLineLabel: { position: 'absolute', left: 0, fontSize: 10, color: '#FF6B6B', fontWeight: 'bold', marginTop: -15 },
@@ -405,7 +451,6 @@ const styles = StyleSheet.create({
   chartDotText: { fontSize: 12, fontWeight: '900', color: '#003366', position: 'absolute', top: -20 },
   chartDateText: { fontSize: 10, color: '#6699CC', fontWeight: 'bold', position: 'absolute', bottom: -22, width: 50, textAlign: 'center' },
 
-  // Modales
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 51, 102, 0.6)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: '#F0F8FF', borderRadius: 24, padding: 25, maxHeight: '90%' },
   smallModalContent: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 25 },
