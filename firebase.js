@@ -3,12 +3,12 @@ import { getFirestore } from 'firebase/firestore';
 
 // Pega AQUÍ el objeto que copiaste de la consola de Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyAAHbbyXDhb7acMxUYWGbH5K0GIpyGWGho",
-  authDomain: "cuentacal.firebaseapp.com",
-  projectId: "cuentacal",
-  storageBucket: "cuentacal.firebasestorage.app",
-  messagingSenderId: "822546542231",
-  appId: "1:822546542231:web:5b292c41fbab70d3d8c3d2"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);

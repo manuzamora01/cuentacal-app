@@ -27,7 +27,7 @@ interface WaterLog {
 }
 
 // 🔑 PON TU API KEY DE GEMINI AQUÍ
-const GEMINI_API_KEY = "AIzaSyDP0ZhTLQCYePxfuLXXNTSrg_g50xGia48";
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
 
 const formatCustomDate = (date: Date) => {
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
